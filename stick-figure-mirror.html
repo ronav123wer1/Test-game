@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stick Figure Mirror</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#f4f1ff; --glow:#5ee7ff; --pink:#ff5fa2; --gold:#ffd23f; --bg:#0d0b24; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
+    font-family:'Fredoka',system-ui,sans-serif; -webkit-user-select:none; user-select:none; }
+  canvas#stage { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  video#cam { position:fixed; left:12px; bottom:12px; width:180px; border-radius:12px;
+    transform:scaleX(-1); opacity:0; pointer-events:none; border:2px solid rgba(255,255,255,.25);
+    transition:opacity .2s; z-index:3; }
+  video#cam.show { opacity:.9; }
+
+  .overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at center, rgba(13,11,36,.75), rgba(13,11,36,.95)); z-index:10; padding:20px; }
+  .hidden { display:none !important; }
+  .card { text-align:center; max-width:560px; }
+  h1 { font-size:clamp(36px,7vw,68px); font-weight:700; line-height:1; letter-spacing:.5px;
+    text-shadow:0 0 24px rgba(94,231,255,.6); }
+  h1 span { color:var(--glow); }
+  .sub { margin:14px auto 28px; font-size:clamp(15px,2.4vw,19px); opacity:.8; max-width:440px; line-height:1.4; }
+  .modes { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+  button { font-family:inherit; cursor:pointer; border:none; color:var(--bg); }
+  .big { font-size:20px; font-weight:600; padding:16px 26px; border-radius:16px; min-width:200px;
+    display:flex; flex-direction:column; align-items:center; gap:4px; transition:transform .12s, box-shadow .12s; }
+  .big small { font-size:13px; font-weight:400; opacity:.75; }
+  .big:hover { transform:translateY(-2px) scale(1.02); }
+  .big:active { transform:scale(.97); }
+  .free { background:var(--glow); box-shadow:0 0 28px rgba(94,231,255,.45); }
+  .play { background:var(--pink); box-shadow:0 0 28px rgba(255,95,162,.45); }
+  .ghost { background:rgba(255,255,255,.12); color:var(--ink); }
+  .tips { margin-top:26px; font-size:14px; opacity:.6; line-height:1.6; }
+  #status { margin-top:18px; min-height:24px; font-size:16px; color:var(--gold); }
+  .spinner { display:inline-block; width:16px; height:16px; border:3px solid rgba(255,210,63,.3);
+    border-top-color:var(--gold); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-3px; margin-right:8px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  #hud { position:fixed; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between;
+    padding:12px 16px; z-index:5; pointer-events:none; }
+  #hud .left, #hud .right { display:flex; gap:10px; align-items:center; pointer-events:auto; }
+  .pill { background:rgba(255,255,255,.1); backdrop-filter:blur(6px); border-radius:999px; padding:8px 16px;
+    font-size:18px; font-weight:600; color:var(--ink); }
+  .pill b { color:var(--gold); }
+  #timer { font-size:22px; }
+  #timer.low { color:var(--pink); animation:pulse .5s ease-in-out infinite alternate; }
+  @keyframes pulse { to { transform:scale(1.12); } }
+  .iconbtn { background:rgba(255,255,255,.12); color:var(--ink); border-radius:999px; padding:8px 14px; font-size:15px; }
+  .iconbtn.on { background:var(--glow); color:var(--bg); }
+
+  #hint { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); z-index:5; background:rgba(0,0,0,.45);
+    padding:10px 20px; border-radius:999px; font-size:17px; transition:opacity .3s; pointer-events:none; white-space:nowrap; }
+  #endScore { font-size:clamp(64px,14vw,120px); font-weight:700; color:var(--gold); text-shadow:0 0 30px rgba(255,210,63,.5); line-height:1; margin:10px 0; }
+  .stats { opacity:.8; font-size:18px; margin-bottom:26px; }
+  .row { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+  .row button { font-size:18px; font-weight:600; padding:14px 24px; border-radius:14px; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted autoplay></video>
+
+<div id="hud" class="hidden">
+  <div class="left">
+    <div class="pill" id="scorePill">Score <b id="score">0</b></div>
+    <div class="pill" id="timerPill"><span id="timer">60</span></div>
+  </div>
+  <div class="right">
+    <button class="iconbtn" id="camBtn">📷 Camera</button>
+    <button class="iconbtn" id="menuBtn">✕ Menu</button>
+  </div>
+</div>
+<div id="hint" style="opacity:0"></div>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>Stick Figure <span>Mirror</span></h1>
+    <p class="sub">Your webcam tracks your whole body and a stick figure copies every move you make.</p>
+    <div class="modes">
+      <button class="big free" data-mode="free">🕺 Free Move<small>Dance around, try poses</small></button>
+      <button class="big play" data-mode="game">🫧 Bubble Pop<small>60 seconds · hands &amp; feet</small></button>
+    </div>
+    <div id="status"></div>
+    <p class="tips">Stand 2–3 metres back so your head and feet are both in view.<br>
+      Free Move tricks: hands up · T-pose · star jump.</p>
+  </div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div class="card">
+    <div style="font-size:24px;opacity:.8">Time's up!</div>
+    <div id="endScore">0</div>
+    <div class="stats" id="endStats"></div>
+    <div class="row">
+      <button class="play" id="againBtn">Play again</button>
+      <button class="ghost" id="toMenuBtn">Menu</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+const MP_VER = "0.10.14";
+const MP_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs`;
+const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`;
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
+
+const $ = id => document.getElementById(id);
+const canvas = $("stage"), ctx = canvas.getContext("2d"), video = $("cam");
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// ---------- canvas sizing ----------
+let W = 0, H = 0, DPR = 1, bgCanvas = null;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  buildBackground();
+}
+function buildBackground() {
+  bgCanvas = document.createElement("canvas");
+  bgCanvas.width = W * DPR; bgCanvas.height = H * DPR;
+  const b = bgCanvas.getContext("2d");
+  b.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const g = b.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#120f33"); g.addColorStop(0.65, "#1b1450"); g.addColorStop(1, "#2a1458");
+  b.fillStyle = g; b.fillRect(0, 0, W, H);
+  // stars
+  for (let i = 0; i < 90; i++) {
+    b.fillStyle = `rgba(255,255,255,${rand(0.15, 0.6)})`;
+    b.beginPath(); b.arc(rand(0, W), rand(0, H * 0.7), rand(0.5, 1.6), 0, 7); b.fill();
+  }
+  // perspective floor grid
+  const horizon = H * 0.72;
+  b.strokeStyle = "rgba(94,231,255,0.18)"; b.lineWidth = 1;
+  for (let i = -14; i <= 14; i++) {
+    b.beginPath(); b.moveTo(W / 2 + i * 22, horizon); b.lineTo(W / 2 + i * W * 0.22, H); b.stroke();
+  }
+  for (let k = 0; k < 9; k++) {
+    const y = horizon + (H - horizon) * Math.pow(k / 8, 1.8);
+    b.beginPath(); b.moveTo(0, y); b.lineTo(W, y); b.stroke();
+  }
+  const glow = b.createLinearGradient(0, horizon - 2, 0, horizon + 30);
+  glow.addColorStop(0, "rgba(255,95,162,0.35)"); glow.addColorStop(1, "rgba(255,95,162,0)");
+  b.fillStyle = glow; b.fillRect(0, horizon - 2, W, 32);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// area the camera image maps onto (contain-fit, mirrored)
+function fitRect() {
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  const s = Math.min(W / vw, H / vh);
+  const w = vw * s, h = vh * s;
+  return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+let R = fitRect();
+
+// ---------- sound ----------
+let audio = null;
+function initAudio() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { audio = null; }
+}
+function tone(f1, f2, dur, type = "sine", vol = 0.18) {
+  if (!audio) return;
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+  o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur + 0.02);
+}
+const sfx = {
+  pop: (combo) => tone(500 + combo * 40, 1100 + combo * 60, 0.12, "triangle"),
+  gold: () => { tone(800, 1600, 0.15, "triangle"); setTimeout(() => tone(1200, 2200, 0.18, "triangle"), 80); },
+  bomb: () => tone(220, 40, 0.4, "sawtooth", 0.22),
+  tick: () => tone(660, 660, 0.08, "square", 0.08),
+  go: () => tone(880, 1320, 0.25, "square", 0.1),
+  trick: () => { [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, f * 1.01, 0.15, "triangle", 0.12), i * 70)); },
+};
+
+// ---------- camera + pose model ----------
+let landmarker = null, camReady = false;
+function setStatus(html) { $("status").innerHTML = html; }
+
+async function startCamera() {
+  if (camReady) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error("This browser can't open the camera from here. Open the file in Chrome, Edge or Firefox on a computer, or host it on an https:// site.");
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
+    });
+  } catch (e) {
+    throw new Error(e.name === "NotAllowedError"
+      ? "Camera permission was blocked. Allow camera access in your browser and try again."
+      : "Couldn't open the camera (" + e.name + "). Is another app using it?");
+  }
+  video.srcObject = stream;
+  await new Promise(res => { if (video.readyState >= 2) res(); else video.onloadeddata = res; });
+  await video.play();
+  camReady = true;
+  R = fitRect();
+}
+
+async function loadModel() {
+  if (landmarker) return;
+  let vision;
+  try { vision = await import(MP_URL); }
+  catch (e) { throw new Error("Couldn't download the body tracker. Check your internet connection."); }
+  const { PoseLandmarker, FilesetResolver } = vision;
+  const files = await FilesetResolver.forVisionTasks(WASM_URL);
+  const opts = (delegate) => ({
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    runningMode: "VIDEO", numPoses: 1,
+    minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+  });
+  try { landmarker = await PoseLandmarker.createFromOptions(files, opts("GPU")); }
+  catch (e) { landmarker = await PoseLandmarker.createFromOptions(files, opts("CPU")); }
+}
+
+// ---------- pose smoothing ----------
+const N = 33, VIS = 0.45;
+const pose = new Array(N).fill(null); // smoothed normalised landmarks {x,y,v}
+let lastSeen = -1e9;
+function updatePose(lms) {
+  for (let i = 0; i < N; i++) {
+    const l = lms[i], v = l.visibility ?? 1, s = pose[i];
+    if (!s) pose[i] = { x: l.x, y: l.y, v };
+    else {
+      const a = 0.6; // higher = snappier, lower = smoother
+      s.x += (l.x - s.x) * a; s.y += (l.y - s.y) * a; s.v += (v - s.v) * 0.4;
+    }
+  }
+}
+function P(i) {
+  const s = pose[i]; if (!s) return null;
+  return { x: R.x + (1 - s.x) * R.w, y: R.y + s.y * R.h, v: s.v };
+}
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, v: Math.min(a.v, b.v) });
+const ok = p => p && p.v > VIS;
+
+// derived body info used by drawing + game
+function body() {
+  const ls = P(11), rs = P(12), lh = P(23), rh = P(24);
+  if (!ls || !rs) return null;
+  const sh = mid(ls, rs);
+  const hip = lh && rh ? mid(lh, rh) : null;
+  const shoulderW = dist(ls, rs);
+  const torso = hip ? dist(sh, hip) : shoulderW * 1.4;
+  const scale = Math.max(shoulderW, torso * 0.75, 30);
+  const lw = clamp(scale * 0.085, 4, 22);
+  const nose = P(0), le = P(7), re = P(8);
+  let head, headR = scale * 0.3, tilt = 0, look = 0;
+  if (ok(le) && ok(re)) {
+    const em = mid(le, re);
+    headR = Math.max(dist(le, re) * 0.72, scale * 0.24);
+    head = { x: em.x, y: em.y - headR * 0.12 };
+    tilt = Math.atan2(re.y - le.y, re.x - le.x);
+    if (tilt > Math.PI / 2) tilt -= Math.PI; if (tilt < -Math.PI / 2) tilt += Math.PI;
+    if (ok(nose)) look = clamp((nose.x - em.x) / headR, -1, 1);
+  } else if (ok(nose)) head = { x: nose.x, y: nose.y - headR * 0.1 };
+  const hand = (w, i) => { const a = P(w), b = P(i); if (!ok(a)) return null; return ok(b) ? { ...mid(a, b), v: a.v } : a; };
+  const foot = (an, ft) => { const a = P(an), b = P(ft); if (!ok(a)) return null; return ok(b) ? { ...mid(a, b), v: a.v } : a; };
+  return {
+    ls, rs, lh, rh, sh, hip, shoulderW, torso, scale, lw, head, headR, tilt, look,
+    le: P(13), re: P(14), lw_: P(15), rw_: P(16), lk: P(25), rk: P(26), la: P(27), ra: P(28),
+    hands: [hand(15, 19), hand(16, 20)], feet: [foot(27, 31), foot(28, 32)],
+  };
+}
+
+// ---------- drawing the stick figure ----------
+function drawFigure(B, alpha, glowColor) {
+  if (!B || alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const path = new Path2D();
+  const seg = (a, b) => { if (ok(a) && ok(b)) { path.moveTo(a.x, a.y); path.lineTo(b.x, b.y); } };
+  const chain = (...pts) => { for (let i = 0; i < pts.length - 1; i++) seg(pts[i], pts[i + 1]); };
+
+  // neck: shoulders' midpoint up to the bottom of the head
+  if (B.head && ok(B.sh)) {
+    const dx = B.sh.x - B.head.x, dy = B.sh.y - B.head.y, d = Math.hypot(dx, dy) || 1;
+    seg(B.sh, { x: B.head.x + dx / d * B.headR, y: B.head.y + dy / d * B.headR, v: 1 });
+  }
+  seg(B.ls, B.rs);
+  if (B.hip) { seg(B.sh, B.hip); seg(B.lh, B.rh); }
+  chain(B.ls, B.le, B.lw_, B.hands[0]);
+  chain(B.rs, B.re, B.rw_, B.hands[1]);
+  chain(B.lh, B.lk, B.la, B.feet[0]);
+  chain(B.rh, B.rk, B.ra, B.feet[1]);
+
+  // glow pass, then crisp core
+  ctx.shadowColor = glowColor; ctx.shadowBlur = B.lw * 2.2;
+  ctx.strokeStyle = glowColor; ctx.lineWidth = B.lw * 1.25; ctx.stroke(path);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = B.lw; ctx.stroke(path);
+
+  // head with a little face that follows where you look / tilt
+  if (B.head) {
+    ctx.save();
+    ctx.translate(B.head.x, B.head.y); ctx.rotate(B.tilt);
+    ctx.shadowColor = glowColor; ctx.shadowBlur = B.lw * 2;
+    ctx.fillStyle = "#1b1450"; ctx.strokeStyle = "#fff"; ctx.lineWidth = B.lw;
+    ctx.beginPath(); ctx.arc(0, 0, B.headR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    const fx = B.look * B.headR * 0.32, er = Math.max(2, B.headR * 0.11);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(fx - B.headR * 0.33, -B.headR * 0.12, er, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(fx + B.headR * 0.33, -B.headR * 0.12, er, 0, 7); ctx.fill();
+    ctx.lineWidth = Math.max(2, B.lw * 0.5);
+    ctx.beginPath(); ctx.arc(fx, B.headR * 0.12, B.headR * 0.38, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
+    ctx.restore();
+  }
+
+  // joints
+  ctx.fillStyle = "#fff";
+  for (const j of [B.le, B.re, B.lk, B.rk]) if (ok(j)) { ctx.beginPath(); ctx.arc(j.x, j.y, B.lw * 0.75, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawHitters(B, alpha) {
+  if (!B) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  const hr = hitRadius(B);
+  B.hands.forEach(h => { if (h) dot(h, hr, "#ff5fa2"); });
+  B.feet.forEach(f => { if (f) dot(f, hr, "#ffd23f"); });
+  ctx.restore();
+  function dot(p, r, c) {
+    ctx.shadowColor = c; ctx.shadowBlur = r; ctx.fillStyle = c;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.75, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+  }
+}
+const hitRadius = B => clamp(B.lw * 1.8, 10, 34);
+
+// ---------- effects ----------
+const particles = [], floats = [];
+function burst(x, y, color, n = 16, speed = 260) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), s = rand(speed * 0.3, speed);
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: 0, max: rand(0.4, 0.8), color, size: rand(2, 6) });
+  }
+}
+function floatText(x, y, text, color, size = 28) { floats.push({ x, y, text, color, size, life: 0, max: 0.9 }); }
+function updateEffects(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.life += dt; if (p.life > p.max) { particles.splice(i, 1); continue; }
+    p.vy += 500 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = floats.length - 1; i >= 0; i--) { const f = floats[i]; f.life += dt; f.y -= 50 * dt; if (f.life > f.max) floats.splice(i, 1); }
+}
+function drawEffects() {
+  for (const p of particles) {
+    ctx.globalAlpha = 1 - p.life / p.max; ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7); ctx.fill();
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const f of floats) {
+    ctx.globalAlpha = 1 - f.life / f.max; ctx.fillStyle = f.color;
+    ctx.font = `700 ${f.size}px Fredoka, sans-serif`; ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- free-move mode: hand trails + pose tricks ----------
+const trails = [[], []];
+let trick = { text: "", t: -10 }, trickCooldown = 0, hue = 0;
+function freeUpdate(B, now, dt) {
+  hue = (hue + dt * 90) % 360;
+  if (!B) { trails.forEach(t => t.length = 0); return; }
+  B.hands.forEach((h, i) => {
+    const t = trails[i];
+    if (h) { t.push({ x: h.x, y: h.y, h: hue + i * 120 }); if (t.length > 18) t.shift(); } else if (t.length) t.shift();
+  });
+  trickCooldown -= dt;
+  if (trickCooldown > 0 || !B.head || !B.hip) return;
+  const [lh, rh] = [B.lw_, B.rw_];
+  if (!ok(lh) || !ok(rh)) return;
+  const handsUp = lh.y < B.head.y - B.headR && rh.y < B.head.y - B.headR;
+  const feetWide = ok(B.la) && ok(B.ra) && Math.abs(B.la.x - B.ra.x) > B.shoulderW * 1.7;
+  const tpose = Math.abs(lh.y - B.sh.y) < B.torso * 0.22 && Math.abs(rh.y - B.sh.y) < B.torso * 0.22
+    && Math.abs(lh.x - rh.x) > B.shoulderW * 2.7;
+  let name = null;
+  if (handsUp && feetWide) name = "⭐ STAR JUMP!";
+  else if (handsUp) name = "🙌 HANDS UP!";
+  else if (tpose) name = "✈️ T-POSE!";
+  if (name) {
+    trick = { text: name, t: now }; trickCooldown = 2.2; sfx.trick();
+    const colors = ["#5ee7ff", "#ff5fa2", "#ffd23f", "#9b7bff"];
+    for (let k = 0; k < 4; k++) burst(rand(W * 0.2, W * 0.8), rand(H * 0.15, H * 0.5), colors[k], 22, 340);
+  }
+}
+function drawTrails() {
+  for (const t of trails) {
+    for (let i = 1; i < t.length; i++) {
+      const a = i / t.length;
+      ctx.strokeStyle = `hsla(${t[i].h},100%,65%,${a * 0.8})`;
+      ctx.lineWidth = 3 + a * 14; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(t[i - 1].x, t[i - 1].y); ctx.lineTo(t[i].x, t[i].y); ctx.stroke();
+    }
+  }
+}
+function drawTrick(now) {
+  const age = (now - trick.t) / 1000;
+  if (age > 1.4) return;
+  const s = 1 + Math.max(0, 0.3 - age) * 1.5;
+  ctx.save();
+  ctx.globalAlpha = clamp(1.4 - age, 0, 1);
+  ctx.translate(W / 2, H * 0.16); ctx.scale(s, s);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `700 ${clamp(W * 0.07, 32, 72)}px Fredoka, sans-serif`;
+  ctx.shadowColor = "#ff5fa2"; ctx.shadowBlur = 24; ctx.fillStyle = "#fff";
+  ctx.fillText(trick.text, 0, 0);
+  ctx.restore();
+}
+
+// ---------- bubble-pop game ----------
+const GAME_LEN = 60;
+const game = { state: "idle", score: 0, time: GAME_LEN, countdown: 0, bubbles: [], spawnT: 0, combo: 0, lastPop: 0, popped: 0, best: 0, bestCombo: 0, shake: 0 };
+try { game.best = +localStorage.getItem("sfm-best") || 0; } catch (e) {}
+
+function resetGame() {
+  Object.assign(game, { state: "countdown", score: 0, time: GAME_LEN, countdown: 3.99, bubbles: [], spawnT: 0, combo: 0, lastPop: 0, popped: 0, bestCombo: 0, shake: 0 });
+  $("score").textContent = "0"; $("timer").textContent = GAME_LEN; $("timer").classList.remove("low");
+}
+function spawnBubble(now) {
+  const base = Math.min(R.w, R.h);
+  const r = base * rand(0.05, 0.075);
+  const roll = Math.random();
+  const type = roll < 0.1 ? "gold" : roll < 0.24 ? "bomb" : "normal";
+  const mx = R.w * 0.06 + r, my = R.h * 0.06 + r;
+  game.bubbles.push({
+    x: rand(R.x + mx, R.x + R.w - mx), y: rand(R.y + my, R.y + R.h - my), r, type,
+    born: now, life: type === "bomb" ? 4.2 : 3.6, hue: rand(170, 320), wob: rand(0, 6),
+  });
+}
+let lastTick = 0;
+function gameUpdate(B, now, dt) {
+  if (game.state === "countdown") {
+    const before = Math.ceil(game.countdown);
+    game.countdown -= dt;
+    const after = Math.ceil(game.countdown);
+    if (after !== before && after > 0) sfx.tick();
+    if (game.countdown <= 0) { game.state = "playing"; sfx.go(); floatText(W / 2, H * 0.4, "GO!", "#ffd23f", 80); }
+    return;
+  }
+  if (game.state !== "playing") return;
+  game.time -= dt;
+  const secs = Math.max(0, Math.ceil(game.time));
+  $("timer").textContent = secs;
+  $("timer").classList.toggle("low", game.time <= 10);
+  if (game.time <= 10 && secs !== lastTick) { lastTick = secs; sfx.tick(); }
+  if (game.time <= 0) return endGame();
+
+  const progress = 1 - game.time / GAME_LEN;
+  game.spawnT -= dt;
+  if (game.spawnT <= 0) {
+    spawnBubble(now);
+    if (progress > 0.5 && Math.random() < 0.35) spawnBubble(now);
+    game.spawnT = lerp(1.0, 0.45, progress);
+  }
+  if (now - game.lastPop > 1500) game.combo = 0;
+
+  const hitters = B ? [...B.hands, ...B.feet].filter(Boolean) : [];
+  const hr = B ? hitRadius(B) : 0;
+  for (let i = game.bubbles.length - 1; i >= 0; i--) {
+    const b = game.bubbles[i];
+    const age = (now - b.born) / 1000;
+    if (age > b.life) { game.bubbles.splice(i, 1); continue; }
+    if (age < 0.25) continue; // can't pop while it's still appearing
+    if (hitters.some(h => dist(h, b) < b.r + hr * 0.75)) {
+      game.bubbles.splice(i, 1);
+      if (b.type === "bomb") {
+        game.score = Math.max(0, game.score - 3); game.combo = 0; game.shake = 0.35;
+        sfx.bomb(); burst(b.x, b.y, "#ff3b3b", 28, 380); burst(b.x, b.y, "#333", 14, 200);
+        floatText(b.x, b.y, "-3", "#ff5f5f", 36);
+      } else {
+        game.combo++; game.popped++; game.lastPop = now; game.bestCombo = Math.max(game.bestCombo, game.combo);
+        const pts = (b.type === "gold" ? 3 : 1) + Math.floor(game.combo / 4);
+        game.score += pts;
+        if (b.type === "gold") { sfx.gold(); burst(b.x, b.y, "#ffd23f", 26, 340); }
+        else { sfx.pop(Math.min(game.combo, 12)); burst(b.x, b.y, `hsl(${b.hue},100%,70%)`, 16); }
+        floatText(b.x, b.y, "+" + pts, b.type === "gold" ? "#ffd23f" : "#fff", 30);
+        if (game.combo > 0 && game.combo % 5 === 0) floatText(W / 2, H * 0.22, `${game.combo} COMBO!`, "#5ee7ff", 48);
+      }
+      $("score").textContent = game.score;
+    }
+  }
+}
+function drawBubbles(now) {
+  for (const b of game.bubbles) {
+    const age = (now - b.born) / 1000;
+    const appear = clamp(age / 0.25, 0, 1), fade = clamp((b.life - age) / 0.5, 0, 1);
+    const r = b.r * (0.4 + 0.6 * easeOutBack(appear)) * (1 + Math.sin(now / 300 + b.wob) * 0.04);
+    ctx.save(); ctx.globalAlpha = fade;
+    if (b.type === "bomb") {
+      ctx.fillStyle = "#2a0f18"; ctx.strokeStyle = "#ff3b3b"; ctx.lineWidth = 4;
+      ctx.shadowColor = "#ff3b3b"; ctx.shadowBlur = 18 + Math.sin(now / 90) * 8;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.fillStyle = "#ff5f5f";
+      ctx.font = `700 ${r * 1.1}px Fredoka, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("✕", b.x, b.y + r * 0.05);
+    } else {
+      const gold = b.type === "gold";
+      const c = gold ? "255,210,63" : null;
+      const g = ctx.createRadialGradient(b.x - r * 0.3, b.y - r * 0.3, r * 0.1, b.x, b.y, r);
+      if (gold) { g.addColorStop(0, "rgba(255,245,200,0.95)"); g.addColorStop(1, `rgba(${c},0.55)`); }
+      else { g.addColorStop(0, `hsla(${b.hue},100%,90%,0.55)`); g.addColorStop(1, `hsla(${b.hue},100%,60%,0.25)`); }
+      ctx.fillStyle = g; ctx.shadowColor = gold ? "#ffd23f" : `hsl(${b.hue},100%,65%)`; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, 7); ctx.fill();
+      ctx.shadowBlur = 0; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = gold ? "#ffd23f" : `hsla(${b.hue},100%,80%,0.9)`; ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.beginPath(); ctx.ellipse(b.x - r * 0.35, b.y - r * 0.4, r * 0.2, r * 0.12, -0.6, 0, 7); ctx.fill();
+      if (gold) {
+        ctx.fillStyle = "#8a5a00"; ctx.font = `700 ${r * 0.9}px Fredoka, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("★", b.x, b.y + r * 0.05);
+      }
+    }
+    ctx.restore();
+  }
+}
+const easeOutBack = t => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+function drawCountdown() {
+  if (game.state !== "countdown") return;
+  const n = Math.ceil(game.countdown), f = game.countdown % 1;
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.globalAlpha = clamp(f * 1.5, 0, 1);
+  ctx.font = `700 ${clamp(W * 0.18, 90, 200) * (0.8 + f * 0.4)}px Fredoka, sans-serif`;
+  ctx.fillStyle = "#fff"; ctx.shadowColor = "#5ee7ff"; ctx.shadowBlur = 30;
+  ctx.fillText(n, W / 2, H * 0.42);
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.font = "600 22px Fredoka, sans-serif";
+  ctx.fillText("Pop bubbles with your hands & feet — dodge the red ones!", W / 2, H * 0.42 + clamp(W * 0.12, 70, 130));
+  ctx.restore();
+}
+function endGame() {
+  game.state = "over";
+  const newBest = game.score > game.best;
+  if (newBest) { game.best = game.score; try { localStorage.setItem("sfm-best", game.best); } catch (e) {} }
+  $("endScore").textContent = game.score;
+  $("endStats").innerHTML = `${game.popped} bubbles popped · best combo ${game.bestCombo}<br>` +
+    (newBest ? "🏆 New high score!" : `High score: ${game.best}`);
+  $("end").classList.remove("hidden");
+  sfx.go();
+}
+
+// ---------- main loop ----------
+let mode = null, lastVideoTime = -1, lastFrame = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+  if (landmarker && camReady && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    try {
+      const res = landmarker.detectForVideo(video, now);
+      if (res && res.landmarks && res.landmarks.length) { updatePose(res.landmarks[0]); lastSeen = now; }
+    } catch (e) { console.warn(e); }
+  }
+  R = fitRect();
+  const presence = clamp(1 - (now - lastSeen - 250) / 500, 0, 1);
+  const B = presence > 0 ? body() : null;
+  if (presence === 0) pose.fill(null);
+
+  if (mode === "free") freeUpdate(presence > 0.5 ? B : null, now, dt);
+  if (mode === "game") gameUpdate(presence > 0.5 ? B : null, now, dt);
+  updateEffects(dt);
+
+  // render
+  ctx.save();
+  if (game.shake > 0) { game.shake -= dt; const s = game.shake * 40; ctx.translate(rand(-s, s), rand(-s, s)); }
+  ctx.drawImage(bgCanvas, 0, 0, W, H);
+  if (mode === "game") drawBubbles(now);
+  if (mode === "free") drawTrails();
+  drawFigure(B, presence, mode === "game" ? "#ff5fa2" : "#5ee7ff");
+  if (mode === "game") drawHitters(B, presence);
+  drawEffects();
+  if (mode === "free") drawTrick(now);
+  if (mode === "game") drawCountdown();
+  ctx.restore();
+
+  // hint when nobody's in view / body cut off
+  let hint = "";
+  if (mode && camReady && landmarker) {
+    if (presence === 0) hint = "👀 I can't see you — step into view";
+    else if (B && (!ok(B.la) || !ok(B.ra))) hint = "↔️ Step back so I can see your feet";
+  }
+  const h = $("hint"); if (hint) h.textContent = hint; h.style.opacity = hint ? 1 : 0;
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---------- UI ----------
+let busy = false;
+async function begin(m) {
+  if (busy) return; busy = true;
+  initAudio();
+  try {
+    setStatus('<span class="spinner"></span>Starting camera…');
+    await startCamera();
+    if (!landmarker) setStatus('<span class="spinner"></span>Loading body tracker (first time takes a few seconds)…');
+    await loadModel();
+    setStatus("");
+    mode = m;
+    $("menu").classList.add("hidden"); $("end").classList.add("hidden"); $("hud").classList.remove("hidden");
+    const isGame = m === "game";
+    $("scorePill").classList.toggle("hidden", !isGame); $("timerPill").classList.toggle("hidden", !isGame);
+    if (isGame) resetGame(); else game.state = "idle";
+    game.bubbles = []; particles.length = 0; floats.length = 0; trails.forEach(t => t.length = 0);
+  } catch (e) {
+    console.error(e);
+    setStatus("⚠️ " + (e.message || e));
+  }
+  busy = false;
+}
+function toMenu() {
+  mode = null; game.state = "idle"; game.bubbles = [];
+  $("hud").classList.add("hidden"); $("end").classList.add("hidden"); $("menu").classList.remove("hidden");
+}
+document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => begin(b.dataset.mode)));
+$("menuBtn").onclick = toMenu;
+$("toMenuBtn").onclick = toMenu;
+$("againBtn").onclick = () => begin("game");
+$("camBtn").onclick = () => { video.classList.toggle("show"); $("camBtn").classList.toggle("on"); };
+window.addEventListener("keydown", e => { if (e.key === "Escape" && mode) toMenu(); });
+</script>
+</body>
+</html>
